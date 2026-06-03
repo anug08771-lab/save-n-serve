@@ -1,0 +1,80 @@
+{
+  "entities": {
+    "user_profiles": {
+      "title": "UserProfile",
+      "description": "Registered donor, NGO, volunteer, or admin profile.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique user ID (typically matches their FirebaseAuth UID)." },
+        "name": { "type": "string", "description": "User's full name." },
+        "email": { "type": "string", "format": "email", "description": "User's unique registered email address." },
+        "role": { "type": "string", "enum": ["donor", "ngo", "volunteer", "admin"], "description": "System role." },
+        "points": { "type": "integer", "description": "Cumulative points earned through serving and donating." },
+        "badges": { "type": "array", "description": "Earned dynamic badge names." },
+        "isVerifiedNGO": { "type": "boolean", "description": "Approval indicator for NGO organization validity." },
+        "phone": { "type": "string", "description": "Optional contact number." },
+        "organizationName": { "type": "string", "description": "Optional organization or corporate entity naming." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "ISO timestamp indicating registration." }
+      },
+      "required": ["id", "name", "email", "role", "points", "badges", "createdAt"]
+    },
+    "donations": {
+      "title": "Donation",
+      "description": "Plentiful surplus food donation posting and delivery progress records.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique food donation identifier." },
+        "foodName": { "type": "string", "description": "Description of food item." },
+        "foodType": { "type": "string", "enum": ["Veg", "Non-Veg"], "description": "Category of meal." },
+        "quantity": { "type": "string", "description": "Quantified portion size." },
+        "numberPeopleServed": { "type": "integer", "description": "Projected people fed parameter." },
+        "pickupAddress": { "type": "string", "description": "Pickup physical address location." },
+        "expiryTime": { "type": "string", "format": "date-time", "description": "Computed safe expiry deadline." },
+        "description": { "type": "string", "description": "Additional user-facing packaging details." },
+        "imageUrl": { "type": "string", "description": "Optional illustration photo URL." },
+        "status": { "type": "string", "enum": ["Pending", "Accepted", "Picked Up", "Delivered", "Completed"], "description": "Active logistic progress." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "ISO creation datetime log." },
+        "donorId": { "type": "string", "description": "UID of the registered donor." },
+        "donorName": { "type": "string", "description": "Name of posting donor." },
+        "donorPhone": { "type": "string", "description": "Phone number fallback contact." },
+        "ngoId": { "type": "string", "description": "NGO handler UID if accepted." },
+        "ngoName": { "type": "string", "description": "NGO organization name identifier." },
+        "volunteerId": { "type": "string", "description": "Volunteer driver/pickup handler UID if assigned." },
+        "volunteerName": { "type": "string", "description": "Name of assigned helper." },
+        "aiAssessment": {
+          "type": "object",
+          "description": "Optional AI-generated quality score and spoilage analysis."
+        }
+      },
+      "required": ["id", "foodName", "foodType", "quantity", "numberPeopleServed", "pickupAddress", "expiryTime", "status", "createdAt", "donorId", "donorName"]
+    },
+    "messages": {
+      "title": "Message",
+      "description": "Coordinating chats between donor, NGO, and Volunteer handlers per donation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique message ID." },
+        "donationId": { "type": "string", "description": "Reference to the active task donation." },
+        "senderId": { "type": "string", "description": "Sender UID." },
+        "senderName": { "type": "string", "description": "Friendly visible name of sender." },
+        "text": { "type": "string", "description": "Body message literal text content." },
+        "timestamp": { "type": "string", "format": "date-time", "description": "Creation timestamp." }
+      },
+      "required": ["id", "donationId", "senderId", "senderName", "text", "timestamp"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": "user_profiles",
+      "description": "Registered and authorized user role profile docs."
+    },
+    "donations/{donationId}": {
+      "schema": "donations",
+      "description": "Logistical surplus donation records."
+    },
+    "donations/{donationId}/messages/{messageId}": {
+      "schema": "messages",
+      "description": "Nested coordinator text chats."
+    }
+  }
+}

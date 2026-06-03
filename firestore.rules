@@ -1,0 +1,195 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Role-based helpers
+    function getRole(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data.role;
+    }
+
+    function isVerifiedNGOUser(userId) {
+      return get(/databases/$(database)/documents/users/$(userId)).data.isVerifiedNGO == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
+    }
+
+    // =====================================
+    // Collection: Users (user_profiles)
+    // =====================================
+    match /users/{userId} {
+      function isValidUserProfile(data) {
+        return data.id is string && data.id.size() <= 128 &&
+               data.id == userId &&
+               data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+               data.email is string && data.email.size() > 0 && data.email.size() <= 200 &&
+               data.role is string && (data.role == "donor" || data.role == "ngo" || data.role == "volunteer" || data.role == "admin") &&
+               data.points is int &&
+               data.badges is list && data.badges.size() <= 20 &&
+               (!data.keys().contains('phone') || (data.phone is string && data.phone.size() <= 30)) &&
+               (!data.keys().contains('organizationName') || (data.organizationName is string && data.organizationName.size() <= 200)) &&
+               (!data.keys().contains('isVerifiedNGO') || data.isVerifiedNGO is bool) &&
+               data.createdAt is string && data.createdAt.size() <= 100;
+      }
+
+      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow list: if isSignedIn(); // Leaderboard and queries
+
+      allow create: if isSignedIn() && 
+                    request.auth.uid == userId && 
+                    isValidUserProfile(incoming()) && 
+                    incoming().role != "admin" && 
+                    incoming().points <= 100 &&
+                    (!incoming().keys().contains('isVerifiedNGO') || incoming().isVerifiedNGO == false);
+
+      allow update: if isSignedIn() && isValidUserProfile(incoming()) && (
+        isAdmin() || 
+        (
+          request.auth.uid == userId && (
+            // Self-edit contact details
+            incoming().diff(existing()).affectedKeys().hasOnly(['phone', 'organizationName'])
+          )
+        )
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // =====================================
+    // Collection: Donations
+    // =====================================
+    match /donations/{donationId} {
+      function isValidDonation(data) {
+        return data.id is string && data.id.size() <= 128 &&
+               data.id == donationId &&
+               data.foodName is string && data.foodName.size() > 0 && data.foodName.size() <= 250 &&
+               data.foodType is string && (data.foodType == "Veg" || data.foodType == "Non-Veg") &&
+               data.quantity is string && data.quantity.size() > 0 && data.quantity.size() <= 100 &&
+               data.numberPeopleServed is int && data.numberPeopleServed >= 1 &&
+               data.pickupAddress is string && data.pickupAddress.size() > 0 && data.pickupAddress.size() <= 500 &&
+               data.expiryTime is string && data.expiryTime.size() <= 100 &&
+               data.description is string && data.description.size() <= 2000 &&
+               (!data.keys().contains('imageUrl') || (data.imageUrl is string && data.imageUrl.size() <= 10000)) &&
+               data.status is string && (data.status == "Pending" || data.status == "Accepted" || data.status == "Picked Up" || data.status == "Delivered" || data.status == "Completed") &&
+               data.createdAt is string && data.createdAt.size() <= 100 &&
+               data.donorId is string && data.donorId.size() <= 128 &&
+               data.donorName is string && data.donorName.size() <= 200 &&
+               (!data.keys().contains('donorPhone') || (data.donorPhone is string && data.donorPhone.size() <= 30)) &&
+               
+               (!data.keys().contains('ngoId') || (data.ngoId is string && data.ngoId.size() <= 128)) &&
+               (!data.keys().contains('ngoName') || (data.ngoName is string && data.ngoName.size() <= 200)) &&
+               (!data.keys().contains('volunteerId') || (data.volunteerId is string && data.volunteerId.size() <= 128)) &&
+               (!data.keys().contains('volunteerName') || (data.volunteerName is string && data.volunteerName.size() <= 200)) &&
+               
+               (!data.keys().contains('aiAssessment') || data.aiAssessment is map);
+      }
+
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() && 
+                    isValidId(donationId) && 
+                    isValidDonation(incoming()) && 
+                    incoming().donorId == request.auth.uid &&
+                    incoming().status == "Pending" &&
+                    exists(/databases/$(database)/documents/users/$(request.auth.uid));
+
+      function isNotCompleted() {
+        return existing().status != "Completed" && existing().status != "Delivered";
+      }
+
+      allow update: if isSignedIn() && 
+                    isValidDonation(incoming()) && (
+                      isAdmin() || (
+                        isNotCompleted() && (
+                          // NGO accepting
+                          (existing().status == "Pending" && 
+                           incoming().status == "Accepted" && 
+                           incoming().ngoId == request.auth.uid && 
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'ngoId', 'ngoName']) &&
+                           getRole(request.auth.uid) == "ngo" &&
+                           isVerifiedNGOUser(request.auth.uid)) ||
+
+                          // Volunteer accepting
+                          ((existing().status == "Pending" || existing().status == "Accepted") && 
+                           incoming().status == "Accepted" && 
+                           incoming().volunteerId == request.auth.uid && 
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status', 'volunteerId', 'volunteerName']) &&
+                           getRole(request.auth.uid) == "volunteer") ||
+
+                          // Logistics updates (only volunteer, ngo, or donor involved)
+                          (incoming().status != "Pending" && 
+                           (existing().ngoId == request.auth.uid || existing().volunteerId == request.auth.uid || existing().donorId == request.auth.uid) &&
+                           incoming().diff(existing()).affectedKeys().hasOnly(['status'])) ||
+
+                          // Donor editing Pending donation info
+                          (existing().donorId == request.auth.uid && 
+                           existing().status == "Pending" && 
+                           incoming().diff(existing()).affectedKeys().hasOnly(['foodName', 'foodType', 'quantity', 'numberPeopleServed', 'pickupAddress', 'expiryTime', 'description', 'imageUrl']))
+                        )
+                      )
+                    );
+
+      allow delete: if isAdmin() || (isSignedIn() && existing().donorId == request.auth.uid && existing().status == "Pending");
+    }
+
+    // =====================================
+    // Collection: Messages (within Donations)
+    // =====================================
+    match /donations/{donationId}/messages/{messageId} {
+      function isValidMessage(data) {
+        return data.id is string && data.id.size() <= 128 &&
+               data.id == messageId &&
+               data.donationId is string && data.donationId == donationId &&
+               data.senderId is string && data.senderId == request.auth.uid &&
+               data.senderName is string && data.senderName.size() > 0 && data.senderName.size() <= 200 &&
+               data.text is string && data.text.size() > 0 && data.text.size() <= 1000 &&
+               data.timestamp is string && data.timestamp.size() <= 100;
+      }
+
+      function isParticipant() {
+        let donation = get(/databases/$(database)/documents/donations/$(donationId)).data;
+        return donation.donorId == request.auth.uid || 
+               donation.ngoId == request.auth.uid || 
+               donation.volunteerId == request.auth.uid;
+      }
+
+      allow read: if isSignedIn() && (isParticipant() || isAdmin());
+
+      allow create: if isSignedIn() && 
+                    isValidId(messageId) && 
+                    isValidMessage(incoming()) && 
+                    (isParticipant() || isAdmin());
+
+      allow update, delete: if isAdmin();
+    }
+  }
+}

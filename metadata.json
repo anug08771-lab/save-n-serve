@@ -1,0 +1,6 @@
+{
+  "name": "Save N Serve",
+  "description": "Full-stack mobile-first platform connecting food donors, NGOs, and volunteers to minimize food waste and feed those in need.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
